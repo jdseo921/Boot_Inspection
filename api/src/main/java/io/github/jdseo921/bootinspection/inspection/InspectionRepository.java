@@ -203,11 +203,15 @@ public class InspectionRepository {
             params.put("serial", f.serialNumber());
         }
         if (f.after() != null) {
-            sql.append(" AND (i.inspected_at, i.id) < (:afterTs, :afterId)");
+            sql.append(f.oldestFirst()
+                    ? " AND (i.inspected_at, i.id) > (:afterTs, :afterId)"
+                    : " AND (i.inspected_at, i.id) < (:afterTs, :afterId)");
             params.put("afterTs", OffsetDateTime.ofInstant(f.after().inspectedAt(), ZoneOffset.UTC));
             params.put("afterId", f.after().id());
         }
-        sql.append(" ORDER BY i.inspected_at DESC, i.id DESC LIMIT :limit");
+        sql.append(f.oldestFirst()
+                ? " ORDER BY i.inspected_at, i.id LIMIT :limit"
+                : " ORDER BY i.inspected_at DESC, i.id DESC LIMIT :limit");
         params.put("limit", f.limit());
         return jdbc.sql(sql.toString()).params(params).query(InspectionRepository::view).list();
     }

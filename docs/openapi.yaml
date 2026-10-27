@@ -49,9 +49,10 @@ paths:
         "422": { $ref: "#/components/responses/Unprocessable" }
     get:
       tags: [Inspections]
-      summary: List boards, newest first
+      summary: List boards
       description: |
-        Keyset-paginated: pass the previous page's `nextCursor` as `cursor`.
+        Keyset-paginated, newest first by default: pass the previous page's
+        `nextCursor` as `cursor`.
         With `serial` set, `from` and `to` are ignored.
       parameters:
         - $ref: "#/components/parameters/From"
@@ -71,6 +72,10 @@ paths:
         - name: cursor
           in: query
           schema: { type: string }
+        - name: sort
+          in: query
+          description: "`oldest` works the review queue first-in first-out."
+          schema: { type: string, enum: [newest, oldest], default: newest }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -320,6 +325,23 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Profile" }
+
+  /api/v1/meta:
+    get:
+      tags: [Catalog]
+      summary: Plant time zone and today's plant date, for date presets
+      responses:
+        "200":
+          description: Server settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timezone: { type: string, examples: [America/Chicago] }
+                  today: { type: string, format: date }
+                  defaultDays: { type: integer }
+                  maxDays: { type: integer }
 
   /actuator/health:
     get:

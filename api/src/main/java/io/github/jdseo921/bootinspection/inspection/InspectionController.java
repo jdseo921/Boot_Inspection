@@ -54,8 +54,9 @@ public class InspectionController {
     }
 
     /**
-     * Newest first, keyset-paginated. With {@code serial} set, the date range
-     * is ignored so a board can be found whenever it was inspected.
+     * Keyset-paginated, newest first unless {@code sort=oldest}. With
+     * {@code serial} set, the date range is ignored so a board can be found
+     * whenever it was inspected.
      */
     @GetMapping
     public PageView<InspectionView> list(
@@ -67,6 +68,7 @@ public class InspectionController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String serial,
             @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) String sort,
             @RequestParam(required = false) Integer limit) {
         int size = limit == null ? DEFAULT_PAGE : limit;
         if (size < 1 || size > MAX_PAGE) {
@@ -85,6 +87,7 @@ public class InspectionController {
                 parseStatus(status),
                 serialNumber,
                 cursor == null || cursor.isBlank() ? null : Cursor.decode(cursor),
+                parseSort(sort),
                 size);
         return service.list(filter);
     }
@@ -97,6 +100,17 @@ public class InspectionController {
     @PostMapping("/{id}/review")
     public InspectionView review(@PathVariable long id, @Valid @RequestBody ReviewIn body) {
         return service.review(id, body.outcome(), body.reviewer());
+    }
+
+    /** {@code newest} (default) or {@code oldest}; the review queue is worked oldest first. */
+    private static boolean parseSort(String sort) {
+        if (sort == null || sort.isBlank() || sort.strip().equalsIgnoreCase("newest")) {
+            return false;
+        }
+        if (sort.strip().equalsIgnoreCase("oldest")) {
+            return true;
+        }
+        throw ApiException.badRequest("sort must be newest or oldest");
     }
 
     private static InspectionFilter.ReviewStatus parseStatus(String status) {

@@ -10,6 +10,7 @@ import java.time.OffsetDateTime;
  * @param toTs exclusive end instant
  * @param status {@code pending} = flagged and not yet reviewed (the review
  *     queue), {@code reviewed} = has an operator decision
+ * @param oldestFirst ascending order, for working a queue first-in first-out
  */
 public record InspectionFilter(
         OffsetDateTime fromTs,
@@ -20,6 +21,7 @@ public record InspectionFilter(
         ReviewStatus status,
         String serialNumber,
         Cursor after,
+        boolean oldestFirst,
         int limit) {
 
     public enum ReviewStatus {

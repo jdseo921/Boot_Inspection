@@ -126,6 +126,7 @@ public class InspectionService {
                 filter.status(),
                 filter.serialNumber(),
                 filter.after(),
+                filter.oldestFirst(),
                 filter.limit() + 1);
         List<InspectionView> rows = inspections.find(probe);
         if (rows.size() <= filter.limit()) {

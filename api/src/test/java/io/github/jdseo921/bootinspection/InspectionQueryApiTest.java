@@ -109,6 +109,38 @@ class InspectionQueryApiTest extends ApiTestSupport {
     }
 
     @Test
+    void reviewQueueCanBeWorkedOldestFirst() {
+        List<Board> boards = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            boards.add(Board.flagged(T0.plusSeconds((i / 2) * 15L), "REVIEW", defect("spur", 5, 5)));
+        }
+        assertThat(post("/api/v1/inspections/batch", batchJson(boards)).status()).isEqualTo(200);
+
+        List<Long> seen = new ArrayList<>();
+        String cursor = null;
+        do {
+            Response page = get("/api/v1/inspections?status=pending&sort=oldest&limit=3"
+                    + (cursor == null ? "" : "&cursor=" + cursor));
+            List<Number> ids = page.read("$.items[*].id");
+            ids.forEach(n -> seen.add(n.longValue()));
+            cursor = page.read("$.nextCursor");
+        } while (cursor != null);
+
+        // Ids were assigned in batch order, which is also time order here.
+        assertThat(seen).containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L);
+        assertThat(get("/api/v1/inspections?sort=sideways").status()).isEqualTo(400);
+    }
+
+    @Test
+    void tellsTheClientThePlantDay() {
+        Response r = get("/api/v1/meta");
+        assertThat(r.status()).isEqualTo(200);
+        assertThat((String) r.read("$.timezone")).isEqualTo("America/Chicago");
+        assertThat((String) r.read("$.today")).matches("\\d{4}-\\d{2}-\\d{2}");
+        assertThat((Integer) r.read("$.defaultDays")).isEqualTo(30);
+    }
+
+    @Test
     void reportsHealth() {
         Response r = get("/actuator/health");
         assertThat(r.status()).isEqualTo(200);
