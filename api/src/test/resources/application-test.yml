@@ -1,0 +1,10 @@
+# Tests wipe and reseed their database before every test, so they use their
+# own database, never the development one.
+spring:
+  datasource:
+    url: ${TEST_DATABASE_URL:jdbc:postgresql://localhost:5432/boot_inspection_test}
+    username: ${TEST_DATABASE_USER:postgres}
+    password: ${TEST_DATABASE_PASSWORD:postgres}
+
+app:
+  timezone: America/Chicago

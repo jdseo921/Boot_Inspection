@@ -1,0 +1,535 @@
+openapi: 3.1.0
+info:
+  title: Boot Inspection API
+  version: 0.1.0
+  description: |
+    Ingest, review and analytics API for automated optical inspection (AOI)
+    results from PCB assembly lines.
+
+    * Times are ISO-8601 instants in UTC. Calendar days (`from`, `to`,
+      `localDay`) are days at the plant, in the server's `APP_TIMEZONE`.
+    * Errors are RFC 9457 problem details (`application/problem+json`).
+    * Analytics read pre-aggregated daily rollups, so their cost does not grow
+      with the number of boards inspected.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Ingest
+  - name: Inspections
+  - name: Analytics
+  - name: Catalog
+
+paths:
+  /api/v1/inspections:
+    post:
+      tags: [Ingest]
+      summary: Store one board
+      description: |
+        Idempotent on `externalId`: sending a board that is already stored
+        returns 200 with `created: false` and changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InspectionIn" }
+      responses:
+        "201":
+          description: Stored.
+          headers:
+            Location: { schema: { type: string }, description: URL of the new inspection }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResult" }
+        "200":
+          description: Already stored; nothing changed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+    get:
+      tags: [Inspections]
+      summary: List boards, newest first
+      description: |
+        Keyset-paginated: pass the previous page's `nextCursor` as `cursor`.
+        With `serial` set, `from` and `to` are ignored.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/LineId"
+        - $ref: "#/components/parameters/ProductId"
+        - name: verdict
+          in: query
+          schema: { $ref: "#/components/schemas/Verdict" }
+        - name: status
+          in: query
+          description: "`pending` = flagged and undecided (the review queue); `reviewed` = has a decision."
+          schema: { type: string, enum: [pending, reviewed] }
+        - name: serial
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/InspectionView" }
+                  nextCursor:
+                    type: [string, "null"]
+                    description: Null on the last page.
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/inspections/batch:
+    post:
+      tags: [Ingest]
+      summary: Store up to 1,000 boards in one transaction
+      description: |
+        All or nothing: if any board is invalid, none is stored. Boards whose
+        `externalId` is already stored are counted as duplicates and skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inspections]
+              properties:
+                inspections:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: { $ref: "#/components/schemas/InspectionIn" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: integer }
+                  created: { type: integer }
+                  duplicates: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/IngestResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+
+  /api/v1/inspections/{id}:
+    get:
+      tags: [Inspections]
+      summary: One board with its outline, profile and flagged regions
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The board.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InspectionDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/inspections/{id}/review:
+    post:
+      tags: [Inspections]
+      summary: Record an operator's decision on a flagged board
+      description: |
+        Each flagged board is decided once. If two operators submit at the
+        same time, exactly one succeeds and the other gets 409.
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reviewer]
+              properties:
+                outcome: { $ref: "#/components/schemas/ReviewOutcome" }
+                reviewer: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Recorded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InspectionView" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The board passed AOI, or was already reviewed.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /api/v1/analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Headline numbers for a period
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/LineId"
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Totals and ratios. Ratios are null when their denominator is 0.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/analytics/yield-trend:
+    get:
+      tags: [Analytics]
+      summary: Per-day totals and first-pass yield
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/LineId"
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: One point per day that has data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TrendPoint" }
+
+  /api/v1/analytics/defect-pareto:
+    get:
+      tags: [Analytics]
+      summary: Flagged regions by defect class, largest first
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/LineId"
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: Bars with share and running share.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    defectClass: { $ref: "#/components/schemas/DefectClass" }
+                    count: { type: integer }
+                    share: { type: number }
+                    cumulativeShare: { type: number }
+
+  /api/v1/analytics/defect-heatmap:
+    get:
+      tags: [Analytics]
+      summary: Where flagged regions fall on one board type
+      description: A 24 x 16 grid over the board outline; each region counts in the cell holding its centre.
+      parameters:
+        - name: productId
+          in: query
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/LineId"
+        - name: defectClass
+          in: query
+          schema: { $ref: "#/components/schemas/DefectClass" }
+      responses:
+        "200":
+          description: Non-empty cells only.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  productId: { type: integer }
+                  partNumber: { type: string }
+                  boardWidthMm: { type: number }
+                  boardHeightMm: { type: number }
+                  cols: { type: integer, const: 24 }
+                  rows: { type: integer, const: 16 }
+                  total: { type: integer }
+                  max: { type: integer }
+                  cells:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        cx: { type: integer, minimum: 0, maximum: 23 }
+                        cy: { type: integer, minimum: 0, maximum: 15 }
+                        count: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/lines:
+    get:
+      tags: [Catalog]
+      summary: Production lines
+      responses:
+        "200":
+          description: All lines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    code: { type: string, examples: [SMT-1] }
+                    name: { type: string }
+                    site: { type: string }
+
+  /api/v1/products:
+    get:
+      tags: [Catalog]
+      summary: Board types
+      responses:
+        "200":
+          description: All board types.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Product" }
+
+  /api/v1/profiles:
+    get:
+      tags: [Catalog]
+      summary: Approved inspection threshold profiles
+      responses:
+        "200":
+          description: All versions of every product's profile.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Profile" }
+
+  /actuator/health:
+    get:
+      tags: [Catalog]
+      summary: Liveness and database health
+      responses:
+        "200": { description: UP }
+        "503": { description: DOWN }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    From:
+      name: from
+      in: query
+      description: First plant calendar day, inclusive. Default 29 days before `to`.
+      schema: { type: string, format: date }
+    To:
+      name: to
+      in: query
+      description: Last plant calendar day, inclusive. Default today. At most 366 days after `from`.
+      schema: { type: string, format: date }
+    LineId:
+      name: lineId
+      in: query
+      schema: { type: integer }
+    ProductId:
+      name: productId
+      in: query
+      schema: { type: integer }
+
+  responses:
+    BadRequest:
+      description: Malformed request or invalid field.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such record.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unprocessable:
+      description: |
+        Well-formed but inconsistent: unknown line, part or profile version;
+        a verdict that does not match the flagged regions; a region outside
+        the board; an externalId twice in one batch.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Verdict:
+      type: string
+      enum: [OK, REVIEW, NG]
+    ReviewOutcome:
+      type: string
+      enum: [CONFIRMED_DEFECT, FALSE_CALL]
+    DefectClass:
+      type: string
+      description: The six classes of the public DeepPCB benchmark.
+      enum: [open, short, mousebite, spur, copper, pin_hole]
+
+    DefectIn:
+      type: object
+      required: [defectClass, xMm, yMm, wMm, hMm, confidence]
+      description: Bounding box in board coordinates, origin at the top-left corner.
+      properties:
+        defectClass: { $ref: "#/components/schemas/DefectClass" }
+        xMm: { type: number, minimum: 0 }
+        yMm: { type: number, minimum: 0 }
+        wMm: { type: number, exclusiveMinimum: 0 }
+        hMm: { type: number, exclusiveMinimum: 0 }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+
+    InspectionIn:
+      type: object
+      required: [externalId, serialNumber, lineCode, partNumber, profileVersion, inspectedAt, verdict, anomalyScore, cycleMs]
+      properties:
+        externalId: { type: string, format: uuid, description: Set by the station; makes retries safe. }
+        serialNumber: { type: string, maxLength: 64 }
+        lineCode: { type: string, examples: [SMT-1] }
+        partNumber: { type: string, examples: [PCB-1001] }
+        profileVersion: { type: integer, minimum: 1 }
+        inspectedAt: { type: string, format: date-time }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        anomalyScore: { type: number, minimum: 0, maximum: 1 }
+        cycleMs: { type: integer, minimum: 1 }
+        defects:
+          type: array
+          maxItems: 50
+          description: Empty for OK; at least one for REVIEW and NG.
+          items: { $ref: "#/components/schemas/DefectIn" }
+
+    IngestResult:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        externalId: { type: string, format: uuid }
+        created: { type: boolean }
+
+    InspectionView:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        externalId: { type: string, format: uuid }
+        serialNumber: { type: string }
+        lineId: { type: integer }
+        lineCode: { type: string }
+        productId: { type: integer }
+        partNumber: { type: string }
+        profileVersion: { type: integer }
+        inspectedAt: { type: string, format: date-time }
+        localDay: { type: string, format: date }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        anomalyScore: { type: number }
+        cycleMs: { type: integer }
+        reviewOutcome:
+          oneOf:
+            - $ref: "#/components/schemas/ReviewOutcome"
+            - type: "null"
+        reviewedBy: { type: [string, "null"] }
+        reviewedAt: { type: [string, "null"], format: date-time }
+        defectCount: { type: integer }
+
+    Product:
+      type: object
+      properties:
+        id: { type: integer }
+        partNumber: { type: string }
+        name: { type: string }
+        boardWidthMm: { type: number }
+        boardHeightMm: { type: number }
+
+    Profile:
+      type: object
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        version: { type: integer }
+        pixelDiff: { type: integer }
+        minDefectAreaPx: { type: integer }
+        modelThreshold: { type: number }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+
+    InspectionDetail:
+      type: object
+      properties:
+        inspection: { $ref: "#/components/schemas/InspectionView" }
+        product: { $ref: "#/components/schemas/Product" }
+        line:
+          type: object
+          properties:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
+            site: { type: string }
+        profile: { $ref: "#/components/schemas/Profile" }
+        defects:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/DefectIn"
+              - type: object
+                properties:
+                  id: { type: integer, format: int64 }
+
+    Summary:
+      type: object
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        inspected: { type: integer }
+        ok: { type: integer }
+        review: { type: integer }
+        ng: { type: integer }
+        confirmedDefects: { type: integer }
+        falseCalls: { type: integer }
+        pendingReview: { type: integer, description: Flagged boards with no decision yet. }
+        firstPassYield: { type: [number, "null"], description: "ok / inspected" }
+        finalYield: { type: [number, "null"], description: "(ok + falseCalls) / (ok + confirmedDefects + falseCalls)" }
+        falseCallRate: { type: [number, "null"], description: "falseCalls / (confirmedDefects + falseCalls)" }
+        meanCycleMs: { type: [number, "null"] }
+        p50CycleMs: { type: [integer, "null"], description: From a 250 ms histogram, interpolated. }
+        p95CycleMs: { type: [integer, "null"] }
+
+    TrendPoint:
+      type: object
+      properties:
+        day: { type: string, format: date }
+        inspected: { type: integer }
+        ok: { type: integer }
+        review: { type: integer }
+        ng: { type: integer }
+        confirmedDefects: { type: integer }
+        falseCalls: { type: integer }
+        firstPassYield: { type: [number, "null"] }
+        falseCallRate: { type: [number, "null"] }
+
+    Problem:
+      type: object
+      description: RFC 9457 problem detail.
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }

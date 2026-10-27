@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: boot-inspection
+  datasource:
+    # Override with SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD.
+    url: jdbc:postgresql://localhost:5432/boot_inspection
+    username: postgres
+    password: postgres
+    hikari:
+      maximum-pool-size: 10
+  mvc:
+    problemdetails:
+      enabled: true
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json,text/html,text/css,text/javascript,application/javascript
+    min-response-size: 2KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+app:
+  # The plant's time zone. Calendar days in the dashboard and rollups use it.
+  timezone: ${APP_TIMEZONE:America/Chicago}
