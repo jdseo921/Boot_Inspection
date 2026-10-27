@@ -1,0 +1,17 @@
+# Build output
+build/
+.gradle/
+dist/
+coverage/
+node_modules/
+*.tsbuildinfo
+
+# Editors and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Local environment
+.env
+*.local
