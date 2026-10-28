@@ -1,0 +1,114 @@
+name: Performance
+
+# Loads 1.2 million simulated boards, then runs the SQL benchmark and the HTTP
+# load test against the real API jar. Numbers land in the job summary, as
+# notices on the run page, and in the perf-results artifact.
+# docs/PERFORMANCE.md quotes a run of this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: Boards to load
+        default: "1200000"
+      duration:
+        description: Seconds measured per HTTP scenario
+        default: "20"
+  push:
+    branches: [dev, main]
+    paths:
+      - "tools/perf/**"
+      - ".github/workflows/perf.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    name: SQL and HTTP benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BOARDS: ${{ inputs.boards || '1200000' }}
+      DURATION: ${{ inputs.duration || '20' }}
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/boot_inspection
+      SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/boot_inspection
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/*/package-lock.json
+
+      - name: Start PostgreSQL 16
+        run: |
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=boot_inspection \
+            postgres:16 -c shared_buffers=1GB -c effective_cache_size=4GB -c work_mem=16MB
+          for i in $(seq 60); do docker exec pg pg_isready -U postgres -d boot_inspection && break; sleep 1; done
+
+      - name: Build the API jar
+        working-directory: api
+        run: ./gradlew --no-daemon bootJar
+
+      - name: Install the generator and the benchmark
+        run: |
+          npm ci --prefix tools/generator
+          npm ci --prefix tools/perf
+
+      - name: Start the API (Flyway creates the schema)
+        run: |
+          java -jar api/build/libs/boot-inspection.jar > api.log 2>&1 &
+          for i in $(seq 90); do
+            curl -sf http://127.0.0.1:8080/actuator/health/readiness && exit 0
+            sleep 1
+          done
+          cat api.log
+          exit 1
+
+      - name: Load simulated boards
+        run: |
+          npm run generate --prefix tools/generator -- --boards "$BOARDS" --days 90
+          docker exec pg psql -U postgres -d boot_inspection -c "VACUUM (ANALYZE)"
+
+      - name: SQL benchmark
+        run: npm run sql --prefix tools/perf -- --json "$PWD/perf-sql.json" --markdown "$PWD/perf-sql.md"
+
+      - name: HTTP load test
+        run: npm run http --prefix tools/perf -- --duration "$DURATION" --json "$PWD/perf-http.json" --markdown "$PWD/perf-http.md"
+
+      - name: Rollups still match the raw tables after ingest under load
+        run: |
+          docker exec pg psql -U postgres -d boot_inspection -At -F ' ' -c "
+            SELECT (SELECT sum(inspected) FROM daily_yield), (SELECT count(*) FROM inspection),
+                   (SELECT sum(n) FROM daily_defects), (SELECT count(*) FROM defect)" > counts.txt
+          read rollup_boards raw_boards rollup_defects raw_defects < counts.txt
+          msg="boards: rollups ${rollup_boards}, raw ${raw_boards}; defect boxes: rollups ${rollup_defects}, raw ${raw_defects}"
+          echo "$msg"
+          if [ "$rollup_boards" = "$raw_boards" ] && [ "$rollup_defects" = "$raw_defects" ]; then
+            echo "::notice title=Rollups match after load test::$msg"
+          else
+            echo "::error title=Rollups drifted during load test::$msg"
+            exit 1
+          fi
+
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: perf-results
+          path: |
+            perf-*.json
+            perf-*.md
+            api.log
+          if-no-files-found: ignore
