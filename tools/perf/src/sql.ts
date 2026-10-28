@@ -48,7 +48,7 @@ interface Query {
   values: unknown[];
 }
 
-interface Side {
+interface Measured {
   label: string;
   latency: Summary;
   rows: number;
@@ -56,11 +56,11 @@ interface Side {
 }
 
 interface Pair {
-  section: "dashboard" | "indexes" | "paging";
+  section: "dashboard" | "tuning" | "indexes" | "paging";
   name: string;
   detail: string;
-  fast: Side;
-  slow: Side;
+  fast: Measured;
+  slow: Measured;
 }
 
 const client = new pg.Client({ connectionString: args["database-url"] });
@@ -123,19 +123,32 @@ async function plan(q: Query): Promise<string> {
 const norm = (v: unknown): unknown =>
   v instanceof Date ? v.toISOString() : typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
 
-/** Rows as comparable JSON; `dropZero` ignores rows whose last column is 0. */
-function canonical(result: Record<string, unknown>[], dropZero = false): string {
-  const vals = result.map((r) => Object.values(r).map(norm));
-  return JSON.stringify(dropZero ? vals.filter((v) => Number(v[v.length - 1]) !== 0) : vals);
+type Rows = Record<string, unknown>[];
+
+/** Rows as comparable JSON, after an optional reshaping of one side. */
+function canonical(result: Rows, shape: (r: Rows) => Rows = (r) => r): string {
+  return JSON.stringify(shape(result).map((r) => Object.values(r).map(norm)));
+}
+
+/** A cycle-time histogram as (bucket, count) rows without empty buckets, from either query shape. */
+function histogram(result: Rows): Rows {
+  const wide = result.length === 1 && "b1" in result[0];
+  const pairs = wide ? Object.values(result[0]).map((n, i) => ({ k: i + 1, n })) : result.map((r) => ({ k: r.k, n: r.n }));
+  return pairs.filter((r) => Number(r.n ?? 0) !== 0);
+}
+
+interface Side {
+  label: string;
+  q: Query;
+  shape?: (r: Rows) => Rows;
 }
 
 async function pair(
   section: Pair["section"],
   name: string,
   detail: string,
-  fast: { label: string; q: Query },
-  slow: { label: string; q: Query; inTransaction?: () => Promise<void> },
-  opts: { dropZero?: boolean } = {},
+  fast: Side,
+  slow: Side & { inTransaction?: () => Promise<void> },
 ): Promise<Pair> {
   const f = await measure(fast.q);
   const fPlan = await plan(fast.q);
@@ -154,7 +167,7 @@ async function pair(
     s = await measure(slow.q);
     sPlan = await plan(slow.q);
   }
-  const same = canonical(f.result, opts.dropZero) === canonical(s.result, opts.dropZero);
+  const same = canonical(f.result, fast.shape) === canonical(s.result, slow.shape);
   if (!same) throw new Error(`${name} (${detail}): the two queries returned different rows`);
   if (f.result.length === 0) throw new Error(`${name} (${detail}): no rows; is the database loaded?`);
   console.error(`  ${name} ${detail}: ${ms(f.latency.p50)} vs ${ms(s.latency.p50)}`);
@@ -202,6 +215,14 @@ const RAW_SUMS = `count(*) AS inspected, count(*) FILTER (WHERE verdict = 'OK') 
   count(*) FILTER (WHERE review_outcome = 'CONFIRMED_DEFECT') AS confirmed_defects,
   count(*) FILTER (WHERE review_outcome = 'FALSE_CALL') AS false_calls, coalesce(sum(cycle_ms), 0) AS cycle_ms_sum`;
 const HEAT_PRODUCT = 1;
+// AnalyticsRepository.cycleHistogram adds the daily arrays element by element
+// (it reads the columns by position; here they are named so pg keeps them all).
+const HISTOGRAM_SQL = `SELECT ${Array.from({ length: 120 }, (_, i) => `sum(cycle_hist[${i + 1}]) AS b${i + 1}`).join(", ")}
+  FROM daily_yield WHERE local_day BETWEEN $1 AND $2`;
+// What it sent before: one row per bucket per day, then GROUP BY.
+const HISTOGRAM_UNNEST_SQL = `SELECT u.k AS k, sum(u.v) AS n FROM daily_yield
+  CROSS JOIN LATERAL unnest(cycle_hist) WITH ORDINALITY AS u(v, k)
+  WHERE local_day BETWEEN $1 AND $2 GROUP BY u.k ORDER BY u.k`;
 
 const pairs: Pair[] = [];
 console.error("dashboard: rollups vs raw tables");
@@ -223,15 +244,7 @@ for (const [days, from] of [
       "dashboard",
       "Cycle-time histogram",
       detail,
-      {
-        label: "rollups",
-        q: {
-          text: `SELECT u.k AS k, sum(u.v) AS n FROM daily_yield
-                 CROSS JOIN LATERAL unnest(cycle_hist) WITH ORDINALITY AS u(v, k)
-                 WHERE local_day BETWEEN $1 AND $2 GROUP BY u.k ORDER BY u.k`,
-          values: v,
-        },
-      },
+      { label: "rollups", q: { text: HISTOGRAM_SQL, values: v }, shape: histogram },
       {
         label: "raw",
         q: {
@@ -239,8 +252,8 @@ for (const [days, from] of [
                  WHERE local_day BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`,
           values: v,
         },
+        shape: histogram,
       },
-      { dropZero: true },
     ),
     await pair(
       "dashboard",
@@ -307,6 +320,22 @@ for (const [days, from] of [
           values: [...v, HEAT_PRODUCT],
         },
       },
+    ),
+  );
+}
+
+console.error("tuning: histogram query, element-wise sums vs unnest");
+for (const [days, from] of [
+  [30, facts.from30],
+  [90, facts.from90],
+] as const) {
+  pairs.push(
+    await pair(
+      "tuning",
+      "Cycle-time histogram",
+      `${days} days`,
+      { label: "element-wise sums", q: { text: HISTOGRAM_SQL, values: [from, today] }, shape: histogram },
+      { label: "unnest + GROUP BY", q: { text: HISTOGRAM_UNNEST_SQL, values: [from, today] }, shape: histogram },
     ),
   );
 }
@@ -477,6 +506,13 @@ const dashTable = table(
   ["l", "l", "r", "r", "r"],
 );
 
+const tuning = bySection("tuning");
+const tuningTable = table(
+  ["Query", "Range", "Element-wise sums (now)", "unnest + GROUP BY (before)", "Faster"],
+  tuning.map((p) => [p.name, p.detail, ms(p.fast.latency.p50), ms(p.slow.latency.p50), times(p.slow.latency.p50, p.fast.latency.p50)]),
+  ["l", "l", "r", "r", "r"],
+);
+
 const idx = bySection("indexes");
 const idxTable = table(
   ["Query", "Scope", "With V2 indexes", "Plan", "Without", "Plan", "Faster"],
@@ -514,6 +550,8 @@ const markdown = [
   header,
   "### Dashboard queries: daily rollups vs raw tables",
   dashTable,
+  "### Tuning: summing the cycle-time histograms",
+  tuningTable,
   "### List queries: with vs without the V2 indexes",
   idxTable,
   "### Deep pages: keyset cursor vs OFFSET",
@@ -529,7 +567,11 @@ notice("SQL: rollups vs raw tables (p50)", [
   `Overview, 30 days: ${ms(overview("30 days", "fast"))} vs ${ms(overview("30 days", "slow"))}`,
   `Overview, 90 days: ${ms(overview("90 days", "fast"))} vs ${ms(overview("90 days", "slow"))}`,
 ]);
-notice("SQL: with vs without V2 indexes (p50)", [...idx.map(line), ...deep.map((p) => `keyset vs OFFSET, ${line(p)}`)]);
+notice("SQL: with vs without V2 indexes (p50)", [
+  ...idx.map(line),
+  ...deep.map((p) => `keyset vs OFFSET, ${line(p)}`),
+  ...tuning.map((p) => `histogram, element-wise sums vs unnest, ${line(p)}`),
+]);
 
 if (args.json) {
   writeFileSync(args.json, JSON.stringify({ facts, machine: machine(), runs: RUNS, pairs, storage, counts }, null, 2) + "\n");

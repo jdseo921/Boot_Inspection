@@ -9,6 +9,8 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -47,17 +49,28 @@ public class AnalyticsRepository {
                 .single();
     }
 
+    /**
+     * {@code sum(cycle_hist[1]), ..., sum(cycle_hist[120])}: adds the daily
+     * histograms element by element in one pass. About five times faster than
+     * unnest + GROUP BY, which made this the slowest dashboard query
+     * (docs/PERFORMANCE.md).
+     */
+    private static final String HISTOGRAM_SUMS = IntStream.rangeClosed(1, RollupGrid.CYCLE_BUCKETS)
+            .mapToObj(i -> "sum(cycle_hist[" + i + "])")
+            .collect(Collectors.joining(", "));
+
     public long[] cycleHistogram(DayRange range, Integer lineId, Integer productId) {
         Where w = where(range, lineId, productId, null);
-        long[] counts = new long[RollupGrid.CYCLE_BUCKETS];
-        jdbc.sql("SELECT u.k AS k, sum(u.v) AS n FROM daily_yield"
-                        + " CROSS JOIN LATERAL unnest(cycle_hist) WITH ORDINALITY AS u(v, k)"
-                        + w.sql + " GROUP BY u.k")
+        return jdbc.sql("SELECT " + HISTOGRAM_SUMS + " FROM daily_yield" + w.sql)
                 .params(w.params)
-                .query((ResultSet rs) -> {
-                    counts[rs.getInt("k") - 1] = rs.getLong("n");
-                });
-        return counts;
+                .query((rs, n) -> {
+                    long[] counts = new long[RollupGrid.CYCLE_BUCKETS];
+                    for (int i = 0; i < counts.length; i++) {
+                        counts[i] = rs.getLong(i + 1); // NULL (no rows) reads as 0
+                    }
+                    return counts;
+                })
+                .single();
     }
 
     public List<DayTotals> byDay(DayRange range, Integer lineId, Integer productId) {

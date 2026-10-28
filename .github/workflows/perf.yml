@@ -30,7 +30,8 @@ concurrency:
 jobs:
   perf:
     name: SQL and HTTP benchmarks
-    runs-on: ubuntu-latest
+    # Pinned so runs stay comparable when ubuntu-latest moves to a new image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       BOARDS: ${{ inputs.boards || '1200000' }}
