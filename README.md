@@ -32,7 +32,7 @@ the rest from the CI build and end-to-end job;
 | Page 2,001 of the board list: keyset cursor vs `OFFSET` | **1.2 ms** vs 291 ms |
 | KPI summary throughput after rewriting its histogram query | **2.8 to 3.9x** higher |
 | First-load CSS after loading the Korean font only when needed | 72.4 kB to **4.4 kB** gzipped |
-| Docker image / ready after `docker run` | 305 MB / 3.1 s |
+| Docker image / ready after `docker run` | 305 MB / 3 to 4 s |
 | Accessibility, all five screens (axe, WCAG 2.1 AA) | **0** violations |
 
 Shared CI runners vary by 20 to 70% between runs; these are from the slower

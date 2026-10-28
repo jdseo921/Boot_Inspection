@@ -205,7 +205,7 @@ the three list queries 190 to 360x faster with the indexes than without.
 | Loading 1.2 million boards | 43.9 s: simulate and `COPY` 37.3 s (about 32,000 boards/s), rebuild rollups 5.1 s, `ANALYZE` 0.5 s | 2 vCPU development container |
 | First-load stylesheet | 72.4 kB to **4.4 kB** gzipped after loading the Korean webfont only when Korean is on screen | `npm run build` |
 | JavaScript bundle | 139 kB gzipped | `npm run build` |
-| Docker image | 305 MB; serving 3.1 s after `docker run` (Spring Boot started in 2.5 s), schema created by Flyway on an empty database | CI, Docker job |
+| Docker image | 305 MB; serving 3.1 to 4.2 s after `docker run` in two runs (Spring Boot started in 2.5 to 3.5 s), schema created by Flyway on an empty database | CI, Docker job |
 | Accessibility | 0 axe violations (WCAG 2.1 A and AA) on all five screens, after darkening the muted text from 3.2:1 to 4.9:1 contrast | CI, Playwright |
 
 ## Run it yourself
