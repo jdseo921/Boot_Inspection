@@ -149,6 +149,9 @@ aws ec2 authorize-security-group-ingress --group-id "$DB_SG" \
 aws ecs wait services-stable --cluster default --services boot-inspection
 ```
 
+If `APP_SG` comes back as `None`, the service is still being set up; wait a
+minute and look it up again.
+
 If the first task starts before that rule exists, it cannot reach the
 database, fails its health check and is replaced; the next one starts
 cleanly. Flyway creates the schema on that first successful start.
