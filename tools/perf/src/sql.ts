@@ -560,6 +560,8 @@ const markdown = [
   storageTable,
 ].join("\n\n");
 publish(markdown, args.markdown);
+// The whole report as one annotation too, so it can be read through the API.
+notice("SQL benchmark, full report (markdown)", [markdown]);
 
 const line = (p: Pair) => `${p.name} (${p.detail}): ${ms(p.fast.latency.p50)} vs ${ms(p.slow.latency.p50)}, ${times(p.slow.latency.p50, p.fast.latency.p50)}`;
 notice("SQL: rollups vs raw tables (p50)", [

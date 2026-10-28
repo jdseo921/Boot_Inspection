@@ -301,6 +301,8 @@ const markdown = [
   ),
 ].join("\n\n");
 publish(markdown, args.markdown);
+// The whole report as one annotation too, so it can be read through the API.
+notice("HTTP load test, full report (markdown)", [markdown]);
 
 notice(
   "HTTP load test (p50 / p95 / p99, throughput)",

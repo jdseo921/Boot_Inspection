@@ -104,9 +104,9 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/boot_inspection
     steps:
       - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build the image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -127,7 +127,7 @@ jobs:
             curl -sf http://127.0.0.1:8080/actuator/health/readiness > /dev/null && break
             sleep 0.25
           done
-          curl -sf http://127.0.0.1:8080/actuator/health/readiness
+          curl -sf http://127.0.0.1:8080/actuator/health/readiness > /dev/null
           ready=$(awk "BEGIN { printf \"%.1f\", $(date +%s.%N) - $start }")
           mb=$(docker image inspect boot-inspection:ci --format '{{.Size}}' | awk '{ printf "%.0f", $1 / 1048576 }')
           started=$(docker logs app 2>&1 | grep -o 'Started BootInspectionApplication in [0-9.]* seconds' || true)
