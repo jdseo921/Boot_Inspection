@@ -18,7 +18,8 @@ Docker · GitHub Actions · Playwright. Interface in English and Korean.
 
 On 1.2 million simulated boards (90 days, 3 lines, 4 board types), on a
 4-vCPU GitHub Actions runner that also runs PostgreSQL and the load
-generator. Every number comes from the [Performance workflow](.github/workflows/perf.yml);
+generator. The speed numbers come from the [Performance workflow](.github/workflows/perf.yml),
+the rest from the CI build and end-to-end job;
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md) has the full tables and method.
 
 | | Result |
