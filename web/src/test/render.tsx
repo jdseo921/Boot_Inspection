@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import { createMemoryRouter } from "react-router";
 import { RouterProvider } from "react-router/dom";
-import { routes } from "../App";
+import { routes } from "../routes";
 
 /** Renders the real routes at a URL, with a fresh query cache and no retries. */
 export function renderAt(path: string) {

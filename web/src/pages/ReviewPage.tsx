@@ -55,13 +55,11 @@ export function ReviewPage() {
   const [message, setMessage] = useState<string | null>(null);
   const review = useReview();
 
+  // With nothing picked, or the picked board gone after a refetch, the
+  // first board in the queue is the current one.
   const index = items.findIndex((i) => i.id === selectedId);
   const current: InspectionView | undefined = index >= 0 ? items[index] : items[0];
   const detail = useInspection(current?.id);
-
-  useEffect(() => {
-    if (selectedId === null && items.length > 0) setSelectedId(items[0].id);
-  }, [items, selectedId]);
 
   const move = useCallback(
     (step: number) => {

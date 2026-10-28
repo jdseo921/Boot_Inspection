@@ -13,7 +13,7 @@
   --surface-sunken: #f3f5f4;
   --ink: #1a2420;
   --ink-2: #4b5852;
-  --ink-3: #7d8983;
+  --ink-3: #5e6a64; /* 4.9:1 on --page, the darkest plane: WCAG AA for small text */
   --hairline: #dde2df;
   --rule: #c6cdc9;
 

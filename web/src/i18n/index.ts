@@ -28,8 +28,22 @@ void i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false }, // React escapes
 });
 
+// The Korean webfont's CSS alone is about 65 kB gzipped (a @font-face rule for
+// each of 100+ unicode-range slices), so it is fetched only once Korean is on
+// screen. Until it arrives the system's Korean font fills in.
+let koreanFont: Promise<unknown> | undefined;
+function loadFont(lng: string) {
+  if (lng === "ko" && !koreanFont) {
+    koreanFont = Promise.all([
+      import("@fontsource/ibm-plex-sans-kr/400.css"),
+      import("@fontsource/ibm-plex-sans-kr/600.css"),
+    ]);
+  }
+}
+
 function syncDocument(lng: string) {
   if (typeof document !== "undefined") document.documentElement.lang = lng;
+  loadFont(lng);
 }
 syncDocument(i18n.language);
 i18n.on("languageChanged", syncDocument);
