@@ -1,0 +1,67 @@
+/*
+ * Design tokens. The palette comes from the subject: the solder-mask green,
+ * silkscreen white and copper of a bare board, on the cool grey of an
+ * inspection station. Chart colours follow the validated data-viz palette;
+ * status colours are reserved for verdicts and always ship with an icon.
+ */
+:root {
+  color-scheme: light;
+
+  /* Planes and ink */
+  --page: #edf0ee;
+  --surface: #fbfcfb;
+  --surface-sunken: #f3f5f4;
+  --ink: #1a2420;
+  --ink-2: #4b5852;
+  --ink-3: #7d8983;
+  --hairline: #dde2df;
+  --rule: #c6cdc9;
+
+  /* The board */
+  --board: #1e5a45;
+  --board-edge: #133d2f;
+  --silk: #eef2e8;
+  --copper: #c8894a;
+  --bracket: #ffd166;
+
+  /* Interactive */
+  --action: #14532d;
+  --action-ink: #ffffff;
+  --focus: #2a78d6;
+
+  /* Data (validated categorical slot 1 and its sequential ramp) */
+  --series-1: #2a78d6;
+  --series-1-wash: rgba(42, 120, 214, 0.1);
+  --heat: 235, 104, 52; /* rgb of the second sequential context (orange) */
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+
+  /* Status: verdicts and review outcomes only */
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --warning: #fab219;
+  --warning-ink: #7a5200;
+  --critical: #d03b3b;
+  --critical-ink: #a32424;
+
+  /* Type */
+  --font-ui: "Barlow", "IBM Plex Sans KR", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --step--1: 0.8125rem;
+  --step-0: 0.9375rem;
+  --step-1: 1.125rem;
+  --step-2: 1.375rem;
+  --step-3: 1.75rem;
+  --hero: 3.5rem;
+
+  /* Space */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  --radius-panel: 6px;
+  --radius-control: 4px;
+}
