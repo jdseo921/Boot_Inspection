@@ -96,3 +96,83 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  e2e:
+    name: Docker image and end-to-end tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/boot_inspection
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: boot-inspection:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start PostgreSQL and the app (1 GB memory limit)
+        run: |
+          docker network create bi
+          docker run -d --name db --network bi -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=boot_inspection postgres:16
+          for i in $(seq 60); do docker exec db pg_isready -U postgres -d boot_inspection && break; sleep 1; done
+          start=$(date +%s.%N)
+          docker run -d --name app --network bi -p 8080:8080 --memory 1g \
+            -e SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/boot_inspection boot-inspection:ci
+          for i in $(seq 240); do
+            curl -sf http://127.0.0.1:8080/actuator/health/readiness > /dev/null && break
+            sleep 0.25
+          done
+          curl -sf http://127.0.0.1:8080/actuator/health/readiness
+          ready=$(awk "BEGIN { printf \"%.1f\", $(date +%s.%N) - $start }")
+          mb=$(docker image inspect boot-inspection:ci --format '{{.Size}}' | awk '{ printf "%.0f", $1 / 1048576 }')
+          started=$(docker logs app 2>&1 | grep -o 'Started BootInspectionApplication in [0-9.]* seconds' || true)
+          echo "::notice title=Docker image::${mb} MB image; serving ${ready} s after docker run (${started}), schema created by Flyway on an empty database"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            tools/generator/package-lock.json
+            web/package-lock.json
+      - name: Load 30 days of simulated boards
+        run: |
+          npm ci --prefix tools/generator
+          npm run generate --prefix tools/generator -- --boards 300000 --days 30
+
+      - name: Install Playwright and Chromium
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: End-to-end tests against the container
+        working-directory: web
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+        run: npx playwright test
+      - name: Summarise end-to-end tests
+        if: always()
+        working-directory: web
+        run: |
+          [ -f e2e-results.json ] || exit 0
+          python3 -c "
+          import json
+          s = json.load(open('e2e-results.json'))['stats']
+          print(f\"::notice title=End-to-end tests::passed={s['expected']} failed={s['unexpected']} flaky={s['flaky']} skipped={s['skipped']} in {s['duration']/1000:.0f} s\")"
+      - name: App log
+        if: failure()
+        run: docker logs app 2>&1 | tail -200
+      - name: Keep the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-report
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
