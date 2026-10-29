@@ -74,7 +74,7 @@ flowchart LR
   dashboard reads a few thousand rollup rows instead of scanning millions of
   boards. A test replays ingest and reviews and checks the rollups equal a
   full rebuild; the Performance workflow checks it again after ingesting
-  about a million more boards under load.
+  about 800,000 more boards under load.
 - **Idempotent ingest.** The whole batch is one `INSERT … SELECT FROM unnest(…)
   ON CONFLICT (external_id) DO NOTHING RETURNING …`; the response says which
   boards were new.
@@ -118,7 +118,7 @@ with user and password `postgres`, and databases `boot_inspection` and
 ```bash
 (cd api && ./gradlew test)                                  # 43 integration and unit tests, real PostgreSQL
 (cd web && npm test)                                        # 28 component tests (Vitest, MSW)
-(cd web && E2E_BASE_URL=http://localhost:8080 npm run e2e)  # 15 Playwright tests against a running app with data
+(cd web && E2E_BASE_URL=http://localhost:8080 npm run e2e)  # 13 Playwright tests against a running app with data
 (cd tools/generator && npm test)                            # 11 tests
 (cd tools/perf && npm test)                                 # 8 tests
 ```
@@ -137,8 +137,8 @@ Every push runs:
 - **Front end**: type check, lint, 28 tests, production build.
 - **Tools**: type check and tests for the generator and the benchmarks.
 - **Docker image and end-to-end tests**: builds the image, starts it with a
-  1 GB memory limit next to PostgreSQL, loads 300,000 boards, and runs 15
-  Playwright tests in desktop and phone viewports: the review flow from the
+  1 GB memory limit next to PostgreSQL, loads 300,000 boards, and runs 13
+  Playwright tests (2 of them again in a phone viewport): the review flow from the
   keyboard, a board posted through the API showing up in search and totals,
   deep links, the Korean switch, and an [axe](https://github.com/dequelabs/axe-core)
   scan of every screen with no WCAG 2.1 AA violations.
